@@ -62,9 +62,9 @@ def setup_complete_database():
     # --- INSERT COURSES ---
     print("Populating course details...")
     courses_data = [
-        (1, "Course 1", 72),  # Update "Course 1" to actual name if desired
+        (1, "Oak Bay", 72),  # Update "Course 1" to actual name if desired
         (2, "The Rock", 71),
-        (3, "Course 3", 71)   # Update "Course 3" to actual name if desired
+        (3, "South Muskoka", 71)   # Update "Course 3" to actual name if desired
     ]
     cursor.executemany('INSERT OR IGNORE INTO Courses VALUES (?, ?, ?)', courses_data)
 
