@@ -14,7 +14,6 @@ cursor.execute('''
         value TEXT
     )
 ''')
-# Default to Course 1 if no active course is set yet
 cursor.execute("INSERT OR IGNORE INTO Settings (key, value) VALUES ('active_course_id', '1')")
 conn.commit()
 conn.close()
@@ -38,8 +37,14 @@ scoring_layout = html.Div(style={'fontFamily': 'system-ui, sans-serif', 'maxWidt
         html.Label("Player"),
         dcc.Dropdown(id='player-dropdown', options=player_options, placeholder="Select Player", style={'marginBottom': '15px'}),
         
-        html.Label("Course"),
-        dcc.Dropdown(id='course-dropdown', options=course_options, placeholder="Select Course", style={'marginBottom': '15px'}),
+        html.Label("Course (Locked by Commissioner)"),
+        dcc.Dropdown(
+            id='course-dropdown',
+            options=course_options,
+            placeholder="Select Course",
+            disabled=True,  # Initially disabled; managed dynamically by callback
+            style={'marginBottom': '15px', 'backgroundColor': '#f0f0f0'}
+        ),
         
         html.Label("Hole"),
         dcc.Dropdown(id='hole-dropdown', options=hole_options, placeholder="Select Hole", style={'marginBottom': '15px'}),
@@ -55,7 +60,6 @@ scoring_layout = html.Div(style={'fontFamily': 'system-ui, sans-serif', 'maxWidt
     
     html.Div(id='output-message', style={'marginTop': '20px', 'textAlign': 'center', 'fontWeight': 'bold'}),
     
-    # Subtle admin navigation link
     html.A("Commissioner Setup", href="/commissioner", style={'display': 'block', 'textAlign': 'center', 'marginTop': '40px', 'fontSize': '12px', 'color': '#ccc', 'textDecoration': 'none'})
 ])
 
@@ -97,12 +101,13 @@ def display_page(pathname):
         return admin_layout
     return scoring_layout
 
-# 2. Dynamic Default Course Loader (Runs when the scoring page loads)
+# 2. Dynamic Default Course Loader & Locker
 @callback(
     Output('course-dropdown', 'value'),
+    Output('course-dropdown', 'disabled'),
     Input('url', 'pathname')
 )
-def set_default_course(pathname):
+def set_and_lock_default_course(pathname):
     if pathname == '/':
         conn = sqlite3.connect('golf_trip.db')
         cursor = conn.cursor()
@@ -110,8 +115,9 @@ def set_default_course(pathname):
         row = cursor.fetchone()
         conn.close()
         if row:
-            return int(row[0])
-    return None
+            # Returns the course ID and sets disabled=True
+            return int(row[0]), True
+    return None, False
 
 # 3. Save Active Course Selection (Admin Panel)
 @callback(
@@ -126,7 +132,6 @@ def update_active_course(n_clicks, course_id):
     
     conn = sqlite3.connect('golf_trip.db')
     cursor = conn.cursor()
-    # REPLACE INTO handles insert or update smoothly if the key already exists
     cursor.execute("REPLACE INTO Settings (key, value) VALUES ('active_course_id', ?)", (str(course_id),))
     conn.commit()
     conn.close()
