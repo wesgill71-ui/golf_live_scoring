@@ -67,7 +67,6 @@ def build_group_setup_layout():
         html.Div(id='setup-error', style={'color': 'red', 'marginTop': '15px', 'textAlign': 'center', 'fontWeight': 'bold'})
     ])
 
-# NEW: We now pass active_view into the layout builder
 def build_scoring_layout(selected_player_ids, start_hole, active_view):
     conn = sqlite3.connect('golf_trip.db')
     placeholders = ','.join('?' for _ in selected_player_ids)
@@ -88,7 +87,6 @@ def build_scoring_layout(selected_player_ids, start_hole, active_view):
             ])
         )
 
-    # Determine which view should be visible upon load
     scoring_display = 'block' if active_view == 'scoring' else 'none'
     leaderboard_display = 'block' if active_view == 'leaderboard' else 'none'
 
@@ -161,7 +159,7 @@ app.layout = html.Div([
     dcc.Location(id='url', refresh=False),
     dcc.Store(id='session-group', storage_type='local'),
     dcc.Store(id='session-hole', storage_type='local'),
-    dcc.Store(id='session-view', storage_type='local'), # NEW: Memory for the current view
+    dcc.Store(id='session-view', storage_type='local'),
     html.Div(id='page-content')
 ])
 
@@ -172,7 +170,7 @@ app.layout = html.Div([
     Input('url', 'pathname'),
     Input('session-group', 'data'),
     State('session-hole', 'data'),
-    State('session-view', 'data') # Read the view memory on load
+    State('session-view', 'data')
 )
 def display_page(pathname, group_data, hole_data, view_data):
     if pathname == '/commissioner':
@@ -227,7 +225,7 @@ def save_tournament_settings(n_clicks, course_id, format_val):
 @callback(
     Output('scoring-ui-container', 'style'),
     Output('leaderboard-ui-container', 'style'),
-    Output('session-view', 'data'), # Update the memory when buttons are clicked
+    Output('session-view', 'data'),
     Input('show-leaderboard-btn', 'n_clicks'),
     Input('hide-leaderboard-btn', 'n_clicks'),
     prevent_initial_call=True
@@ -244,7 +242,7 @@ def toggle_views(show_clicks, hide_clicks):
 @callback(
     Output('session-group', 'data', allow_duplicate=True),
     Output('session-hole', 'data', allow_duplicate=True),
-    Output('session-view', 'data', allow_duplicate=True), # Reset view on new round
+    Output('session-view', 'data', allow_duplicate=True),
     Output('setup-error', 'children', allow_duplicate=True),
     Input('start-round-btn', 'n_clicks'),
     State('group-selector', 'value'),
@@ -259,7 +257,7 @@ def start_round(n_clicks, selected_players):
 @callback(
     Output('session-group', 'data', allow_duplicate=True),
     Output('session-hole', 'data', allow_duplicate=True),
-    Output('session-view', 'data', allow_duplicate=True), # Reset view on clear
+    Output('session-view', 'data', allow_duplicate=True),
     Input('clear-group-btn', 'n_clicks'),
     prevent_initial_call=True
 )
@@ -306,54 +304,57 @@ def update_hole_view(course_id, hole_num, player_ids):
         
     return par_text, out_values
 
+
+# --- THE NEW MEGA-CALLBACK FOR AUTO-SAVING AND NAVIGATION ---
 @callback(
-    Output('output-message', 'children'),
+    Output('hole-dropdown', 'value'),
+    Output('output-message', 'children', allow_duplicate=True),
     Input('submit-btn', 'n_clicks'),
+    Input('prev-hole-btn', 'n_clicks'),
+    Input('next-hole-btn', 'n_clicks'),
     State('course-dropdown', 'value'),
     State('hole-dropdown', 'value'),
     State({'type': 'player-score', 'index': ALL}, 'id'),
     State({'type': 'player-score', 'index': ALL}, 'value'),
     prevent_initial_call=True
 )
-def save_group_scores(n_clicks, course_id, hole, player_ids, player_scores):
-    if not n_clicks: return no_update
-    if not course_id or not hole:
-        return html.Span("Error: Course and Hole must be selected.", style={'color': 'red'})
-        
-    conn = sqlite3.connect('golf_trip.db')
-    cursor = conn.cursor()
-    inserted_count = 0
-    for pid_dict, score in zip(player_ids, player_scores):
-        pid = pid_dict['index']
-        if score is not None and score > 0:
-            cursor.execute('DELETE FROM Scores WHERE player_id = ? AND course_id = ? AND hole_number = ?', (pid, course_id, hole))
-            cursor.execute('INSERT INTO Scores (player_id, course_id, hole_number, strokes) VALUES (?, ?, ?, ?)', (pid, course_id, hole, score))
-            inserted_count += 1
-    conn.commit()
-    conn.close()
-    
-    if inserted_count == 0:
-        return html.Span("No scores entered.", style={'color': 'orange'})
-    return html.Span(f"Saved {inserted_count} scores for Hole {hole}!", style={'color': 'green'})
-
-@callback(
-    Output('hole-dropdown', 'value'),
-    Output('output-message', 'children', allow_duplicate=True),
-    Input('prev-hole-btn', 'n_clicks'),
-    Input('next-hole-btn', 'n_clicks'),
-    State('hole-dropdown', 'value'),
-    prevent_initial_call=True
-)
-def change_hole(prev_clicks, next_clicks, current_hole):
-    if not prev_clicks and not next_clicks: return no_update, no_update
-    
-    current_hole = int(current_hole) if current_hole else 1
+def handle_scoring_and_navigation(save_clicks, prev_clicks, next_clicks, course_id, current_hole, player_ids, player_scores):
     triggered_id = ctx.triggered_id
+    if not triggered_id: return no_update, no_update
+    
+    # 1. ALWAYS attempt to save current scores first (Bulletproof string parsing)
+    inserted_count = 0
+    if course_id and current_hole:
+        conn = sqlite3.connect('golf_trip.db')
+        cursor = conn.cursor()
+        for pid_dict, score in zip(player_ids, player_scores):
+            pid = pid_dict['index']
+            try:
+                # Safely cast to integer. If empty string (""), it skips cleanly.
+                val = int(score)
+                if val > 0:
+                    cursor.execute('DELETE FROM Scores WHERE player_id = ? AND course_id = ? AND hole_number = ?', (pid, course_id, current_hole))
+                    cursor.execute('INSERT INTO Scores (player_id, course_id, hole_number, strokes) VALUES (?, ?, ?, ?)', (pid, course_id, current_hole, val))
+                    inserted_count += 1
+            except (TypeError, ValueError):
+                pass
+        conn.commit()
+        conn.close()
+
+    # 2. Process the actual button action
+    current_hole = int(current_hole) if current_hole else 1
+    
     if triggered_id == 'next-hole-btn' and current_hole < 18:
-        return current_hole + 1, ""
+        return current_hole + 1, "" # Navigates and wipes message
     elif triggered_id == 'prev-hole-btn' and current_hole > 1:
-        return current_hole - 1, ""
-    return current_hole, no_update
+        return current_hole - 1, "" # Navigates and wipes message
+    elif triggered_id == 'submit-btn':
+        if inserted_count == 0:
+            return no_update, html.Span("No valid scores entered.", style={'color': 'orange'})
+        return no_update, html.Span(f"Saved {inserted_count} scores for Hole {current_hole}!", style={'color': 'green'})
+    
+    return no_update, no_update
+
 
 @callback(
     Output('session-hole', 'data', allow_duplicate=True),
@@ -367,9 +368,10 @@ def save_current_hole(hole_val):
 @callback(
     Output('leaderboard-container', 'children'),
     Input('course-dropdown', 'value'),
-    Input('submit-btn', 'n_clicks')
+    Input('submit-btn', 'n_clicks'),
+    Input('show-leaderboard-btn', 'n_clicks') # NEW: Re-builds right before showing it
 )
-def render_live_leaderboard(course_id, n_clicks):
+def render_live_leaderboard(course_id, submit_clicks, view_clicks):
     if not course_id:
         return html.Div()
         
