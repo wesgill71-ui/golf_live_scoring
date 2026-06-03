@@ -2,7 +2,6 @@ from dash import Dash, html, dcc, Input, Output, State, callback, ALL, ctx, no_u
 import sqlite3
 import pandas as pd
 
-# The golden rule for multi-page Dash apps: Suppress the exceptions
 app = Dash(__name__, suppress_callback_exceptions=True)
 server = app.server
 
@@ -81,17 +80,8 @@ def build_scoring_layout(selected_player_ids):
             ])
         )
 
-    return html.Div(style={'fontFamily': 'system-ui, sans-serif', 'maxWidth': '500px', 'margin': 'auto', 'padding': '20px'}, children=[
-        html.Div(style={'display': 'flex', 'justifyContent': 'space-between', 'alignItems': 'center', 'marginBottom': '15px'}, children=[
-            html.H2("Live Scoring", style={'margin': '0'}),
-            html.Button('Edit Group', id='clear-group-btn', n_clicks=0, style={'padding': '5px 10px', 'backgroundColor': '#dc3545', 'color': 'white', 'border': 'none', 'borderRadius': '4px', 'cursor': 'pointer', 'fontSize': '12px'})
-        ]),
-        
-        dcc.Dropdown(
-            id='course-dropdown', options=course_options, disabled=True,
-            style={'marginBottom': '20px', 'backgroundColor': '#f0f0f0', 'textAlign': 'center'}
-        ),
-        
+    # VIEW 1: The Input Controls
+    scoring_ui = html.Div(id='scoring-ui-container', style={'display': 'block'}, children=[
         html.Div(style={'display': 'flex', 'justifyContent': 'space-between', 'alignItems': 'center', 'backgroundColor': '#343a40', 'padding': '15px', 'borderRadius': '8px', 'marginBottom': '20px', 'color': 'white'}, children=[
             html.Button('←', id='prev-hole-btn', n_clicks=0, style={'padding': '10px 15px', 'backgroundColor': '#6c757d', 'color': 'white', 'border': 'none', 'borderRadius': '5px', 'cursor': 'pointer', 'fontWeight': 'bold', 'fontSize': '16px'}),
             html.Div(style={'display': 'flex', 'flexDirection': 'column', 'alignItems': 'center'}, children=[
@@ -108,7 +98,36 @@ def build_scoring_layout(selected_player_ids):
             'border': 'none', 'borderRadius': '8px', 'fontSize': '18px', 'cursor': 'pointer', 'fontWeight': 'bold'
         }),
         
-        html.Div(id='output-message', style={'marginTop': '20px', 'textAlign': 'center', 'fontWeight': 'bold'})
+        html.Div(id='output-message', style={'marginTop': '10px', 'marginBottom': '20px', 'textAlign': 'center', 'fontWeight': 'bold'}),
+        
+        html.Button('🏆 View Leaderboard', id='show-leaderboard-btn', n_clicks=0, style={
+            'width': '100%', 'padding': '15px', 'backgroundColor': '#17a2b8', 'color': 'white',
+            'border': 'none', 'borderRadius': '8px', 'fontSize': '18px', 'cursor': 'pointer', 'fontWeight': 'bold'
+        }),
+    ])
+
+    # VIEW 2: The Leaderboard Screen
+    leaderboard_ui = html.Div(id='leaderboard-ui-container', style={'display': 'none'}, children=[
+        html.Button('← Back to Scoring', id='hide-leaderboard-btn', n_clicks=0, style={
+            'width': '100%', 'padding': '10px', 'backgroundColor': '#6c757d', 'color': 'white',
+            'border': 'none', 'borderRadius': '5px', 'cursor': 'pointer', 'fontWeight': 'bold', 'marginBottom': '20px'
+        }),
+        html.Div(id='leaderboard-container')
+    ])
+
+    return html.Div(style={'fontFamily': 'system-ui, sans-serif', 'maxWidth': '500px', 'margin': 'auto', 'padding': '20px'}, children=[
+        html.Div(style={'display': 'flex', 'justifyContent': 'space-between', 'alignItems': 'center', 'marginBottom': '15px'}, children=[
+            html.H2("Live Scoring", style={'margin': '0'}),
+            html.Button('Edit Group', id='clear-group-btn', n_clicks=0, style={'padding': '5px 10px', 'backgroundColor': '#dc3545', 'color': 'white', 'border': 'none', 'borderRadius': '4px', 'cursor': 'pointer', 'fontSize': '12px'})
+        ]),
+        
+        dcc.Dropdown(
+            id='course-dropdown', options=course_options, disabled=True,
+            style={'marginBottom': '20px', 'backgroundColor': '#f0f0f0', 'textAlign': 'center'}
+        ),
+        
+        scoring_ui,
+        leaderboard_ui
     ])
 
 admin_layout = html.Div(style={'fontFamily': 'system-ui, sans-serif', 'maxWidth': '500px', 'margin': 'auto', 'padding': '20px'}, children=[
@@ -131,7 +150,6 @@ app.layout = html.Div([
 
 # --- Back-End Logic ---
 
-# 1. Routing & Layout Rendering
 @callback(
     Output('page-content', 'children'),
     Input('url', 'pathname'),
@@ -140,13 +158,27 @@ app.layout = html.Div([
 def display_page(pathname, group_data):
     if pathname == '/commissioner':
         return admin_layout
-    
     if not group_data:
         return build_group_setup_layout()
     else:
         return build_scoring_layout(group_data)
 
-# 2a. Start Round (Setup Screen Only)
+# --- NEW: View Switching Toggle ---
+@callback(
+    Output('scoring-ui-container', 'style'),
+    Output('leaderboard-ui-container', 'style'),
+    Input('show-leaderboard-btn', 'n_clicks'),
+    Input('hide-leaderboard-btn', 'n_clicks'),
+    prevent_initial_call=True
+)
+def toggle_views(show_clicks, hide_clicks):
+    triggered_id = ctx.triggered_id
+    if triggered_id == 'show-leaderboard-btn':
+        return {'display': 'none'}, {'display': 'block'}
+    elif triggered_id == 'hide-leaderboard-btn':
+        return {'display': 'block'}, {'display': 'none'}
+    return no_update, no_update
+
 @callback(
     Output('session-group', 'data', allow_duplicate=True),
     Output('setup-error', 'children', allow_duplicate=True),
@@ -159,7 +191,6 @@ def start_round(n_clicks, selected_players):
         return no_update, "Please select at least one player to tee off."
     return selected_players, ""
 
-# 2b. Clear Group (Scoring Screen Only)
 @callback(
     Output('session-group', 'data', allow_duplicate=True),
     Input('clear-group-btn', 'n_clicks'),
@@ -168,7 +199,6 @@ def start_round(n_clicks, selected_players):
 def clear_group(n_clicks):
     return None
 
-# 3. Lock Course
 @callback(Output('course-dropdown', 'value'), Input('url', 'pathname'))
 def set_default_course(pathname):
     if pathname == '/':
@@ -180,7 +210,6 @@ def set_default_course(pathname):
         if row: return int(row[0])
     return None
 
-# 4. Update Course (Admin)
 @callback(
     Output('admin-output-message', 'children'),
     Input('set-active-course-btn', 'n_clicks'),
@@ -196,7 +225,6 @@ def update_active_course(n_clicks, course_id):
     conn.close()
     return html.Span("Active course updated!", style={'color': 'green'})
 
-# 5. Fetch Par & Existing Scores
 @callback(
     Output('par-display', 'children'),
     Output({'type': 'player-score', 'index': ALL}, 'value'),
@@ -225,7 +253,6 @@ def update_hole_view(course_id, hole_num, player_ids):
         
     return par_text, out_values
 
-# 6. Save Group Scores
 @callback(
     Output('output-message', 'children'),
     Input('submit-btn', 'n_clicks'),
@@ -255,7 +282,6 @@ def save_group_scores(n_clicks, course_id, hole, player_ids, player_scores):
         return html.Span("No scores entered.", style={'color': 'orange'})
     return html.Span(f"Saved {inserted_count} scores for Hole {hole}!", style={'color': 'green'})
 
-# 7. Next / Previous Hole Navigation
 @callback(
     Output('hole-dropdown', 'value'),
     Output('output-message', 'children', allow_duplicate=True),
@@ -272,5 +298,69 @@ def change_hole(prev_clicks, next_clicks, current_hole):
         return current_hole - 1, ""
     return current_hole, no_update
 
+@callback(
+    Output('leaderboard-container', 'children'),
+    Input('course-dropdown', 'value'),
+    Input('submit-btn', 'n_clicks')
+)
+def render_live_leaderboard(course_id, n_clicks):
+    if not course_id:
+        return html.Div()
+        
+    conn = sqlite3.connect('golf_trip.db')
+    query = """
+        SELECT 
+            p.name,
+            SUM(s.strokes) as total_strokes,
+            SUM(ch.par) as total_par,
+            SUM(s.strokes) - SUM(ch.par) as to_par,
+            COUNT(s.hole_number) as holes_played
+        FROM Scores s
+        JOIN Players p ON s.player_id = p.player_id
+        JOIN Course_Holes ch ON s.course_id = ch.course_id AND s.hole_number = ch.hole_number
+        WHERE s.course_id = ?
+        GROUP BY p.player_id
+        ORDER BY to_par ASC
+    """
+    df = pd.read_sql_query(query, conn, params=(course_id,))
+    conn.close()
+    
+    if df.empty:
+        return html.Div("No scores posted yet.", style={'textAlign': 'center', 'color': '#666'})
+
+    table_rows = []
+    table_rows.append(html.Tr(style={'backgroundColor': '#343a40', 'color': 'white', 'textAlign': 'left'}, children=[
+        html.Th("Pos", style={'padding': '10px'}),
+        html.Th("Player", style={'padding': '10px'}),
+        html.Th("To Par", style={'padding': '10px', 'textAlign': 'center'}),
+        html.Th("Thru", style={'padding': '10px', 'textAlign': 'center'})
+    ]))
+    
+    for index, row in df.iterrows():
+        to_par_val = row['to_par']
+        if to_par_val == 0:
+            display_score = "E"
+            score_color = "black"
+        elif to_par_val > 0:
+            display_score = f"+{to_par_val}"
+            score_color = "red"
+        else:
+            display_score = f"{to_par_val}"
+            score_color = "green"
+            
+        row_color = "#f9f9f9" if index % 2 == 0 else "white"
+        
+        table_rows.append(html.Tr(style={'backgroundColor': row_color, 'borderBottom': '1px solid #ddd'}, children=[
+            html.Td(f"{index + 1}", style={'padding': '10px', 'fontWeight': 'bold'}),
+            html.Td(row['name'], style={'padding': '10px'}),
+            html.Td(display_score, style={'padding': '10px', 'textAlign': 'center', 'color': score_color, 'fontWeight': 'bold'}),
+            html.Td(row['holes_played'], style={'padding': '10px', 'textAlign': 'center', 'color': '#666'})
+        ]))
+
+    return html.Div(style={'marginTop': '10px'}, children=[
+        html.H3("Live Leaderboard (Gross)", style={'textAlign': 'center', 'marginBottom': '15px'}),
+        html.Table(style={'width': '100%', 'borderCollapse': 'collapse', 'boxShadow': '0 2px 5px rgba(0,0,0,0.1)'}, children=table_rows)
+    ])
+
 if __name__ == '__main__':
-    app.run(debug=True, port=8886)
+    app.run(debug=True, port=8885)
