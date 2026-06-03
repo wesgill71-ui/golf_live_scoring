@@ -67,7 +67,8 @@ def build_group_setup_layout():
         html.Div(id='setup-error', style={'color': 'red', 'marginTop': '15px', 'textAlign': 'center', 'fontWeight': 'bold'})
     ])
 
-def build_scoring_layout(selected_player_ids, start_hole):
+# NEW: We now pass active_view into the layout builder
+def build_scoring_layout(selected_player_ids, start_hole, active_view):
     conn = sqlite3.connect('golf_trip.db')
     placeholders = ','.join('?' for _ in selected_player_ids)
     df = pd.read_sql_query(f"SELECT * FROM Players WHERE player_id IN ({placeholders})", conn, params=selected_player_ids)
@@ -87,7 +88,11 @@ def build_scoring_layout(selected_player_ids, start_hole):
             ])
         )
 
-    scoring_ui = html.Div(id='scoring-ui-container', style={'display': 'block'}, children=[
+    # Determine which view should be visible upon load
+    scoring_display = 'block' if active_view == 'scoring' else 'none'
+    leaderboard_display = 'block' if active_view == 'leaderboard' else 'none'
+
+    scoring_ui = html.Div(id='scoring-ui-container', style={'display': scoring_display}, children=[
         html.Div(style={'display': 'flex', 'justifyContent': 'space-between', 'alignItems': 'center', 'backgroundColor': '#343a40', 'padding': '15px', 'borderRadius': '8px', 'marginBottom': '20px', 'color': 'white'}, children=[
             html.Button('←', id='prev-hole-btn', n_clicks=0, style={'padding': '10px 15px', 'backgroundColor': '#6c757d', 'color': 'white', 'border': 'none', 'borderRadius': '5px', 'cursor': 'pointer', 'fontWeight': 'bold', 'fontSize': '16px'}),
             html.Div(style={'display': 'flex', 'flexDirection': 'column', 'alignItems': 'center'}, children=[
@@ -112,7 +117,7 @@ def build_scoring_layout(selected_player_ids, start_hole):
         }),
     ])
 
-    leaderboard_ui = html.Div(id='leaderboard-ui-container', style={'display': 'none'}, children=[
+    leaderboard_ui = html.Div(id='leaderboard-ui-container', style={'display': leaderboard_display}, children=[
         html.Button('← Back to Scoring', id='hide-leaderboard-btn', n_clicks=0, style={
             'width': '100%', 'padding': '10px', 'backgroundColor': '#6c757d', 'color': 'white',
             'border': 'none', 'borderRadius': '5px', 'cursor': 'pointer', 'fontWeight': 'bold', 'marginBottom': '20px'
@@ -156,6 +161,7 @@ app.layout = html.Div([
     dcc.Location(id='url', refresh=False),
     dcc.Store(id='session-group', storage_type='local'),
     dcc.Store(id='session-hole', storage_type='local'),
+    dcc.Store(id='session-view', storage_type='local'), # NEW: Memory for the current view
     html.Div(id='page-content')
 ])
 
@@ -165,16 +171,18 @@ app.layout = html.Div([
     Output('page-content', 'children'),
     Input('url', 'pathname'),
     Input('session-group', 'data'),
-    State('session-hole', 'data') # CRITICAL FIX: Changed from Input to State
+    State('session-hole', 'data'),
+    State('session-view', 'data') # Read the view memory on load
 )
-def display_page(pathname, group_data, hole_data):
+def display_page(pathname, group_data, hole_data, view_data):
     if pathname == '/commissioner':
         return admin_layout
     if not group_data:
         return build_group_setup_layout()
     else:
         current_hole = int(hole_data) if hole_data else 1
-        return build_scoring_layout(group_data, current_hole)
+        active_view = view_data if view_data else 'scoring'
+        return build_scoring_layout(group_data, current_hole, active_view)
 
 @callback(
     Output('admin-course-dropdown', 'value'),
@@ -219,42 +227,45 @@ def save_tournament_settings(n_clicks, course_id, format_val):
 @callback(
     Output('scoring-ui-container', 'style'),
     Output('leaderboard-ui-container', 'style'),
+    Output('session-view', 'data'), # Update the memory when buttons are clicked
     Input('show-leaderboard-btn', 'n_clicks'),
     Input('hide-leaderboard-btn', 'n_clicks'),
     prevent_initial_call=True
 )
 def toggle_views(show_clicks, hide_clicks):
-    if not show_clicks and not hide_clicks: return no_update, no_update
+    if not show_clicks and not hide_clicks: return no_update, no_update, no_update
     triggered_id = ctx.triggered_id
     if triggered_id == 'show-leaderboard-btn':
-        return {'display': 'none'}, {'display': 'block'}
+        return {'display': 'none'}, {'display': 'block'}, 'leaderboard'
     elif triggered_id == 'hide-leaderboard-btn':
-        return {'display': 'block'}, {'display': 'none'}
-    return no_update, no_update
+        return {'display': 'block'}, {'display': 'none'}, 'scoring'
+    return no_update, no_update, no_update
 
 @callback(
     Output('session-group', 'data', allow_duplicate=True),
     Output('session-hole', 'data', allow_duplicate=True),
+    Output('session-view', 'data', allow_duplicate=True), # Reset view on new round
     Output('setup-error', 'children', allow_duplicate=True),
     Input('start-round-btn', 'n_clicks'),
     State('group-selector', 'value'),
     prevent_initial_call=True
 )
 def start_round(n_clicks, selected_players):
-    if not n_clicks: return no_update, no_update, no_update
+    if not n_clicks: return no_update, no_update, no_update, no_update
     if not selected_players or len(selected_players) == 0:
-        return no_update, no_update, "Please select at least one player to tee off."
-    return selected_players, 1, ""
+        return no_update, no_update, no_update, "Please select at least one player to tee off."
+    return selected_players, 1, 'scoring', ""
 
 @callback(
     Output('session-group', 'data', allow_duplicate=True),
     Output('session-hole', 'data', allow_duplicate=True),
+    Output('session-view', 'data', allow_duplicate=True), # Reset view on clear
     Input('clear-group-btn', 'n_clicks'),
     prevent_initial_call=True
 )
 def clear_group(n_clicks):
-    if not n_clicks: return no_update, no_update # CRITICAL FIX: Blocks phantom triggers
-    return None, 1
+    if not n_clicks: return no_update, no_update, no_update
+    return None, 1, 'scoring'
 
 @callback(Output('course-dropdown', 'value'), Input('url', 'pathname'))
 def set_default_course(pathname):
@@ -334,7 +345,7 @@ def save_group_scores(n_clicks, course_id, hole, player_ids, player_scores):
     prevent_initial_call=True
 )
 def change_hole(prev_clicks, next_clicks, current_hole):
-    if not prev_clicks and not next_clicks: return no_update, no_update # CRITICAL FIX
+    if not prev_clicks and not next_clicks: return no_update, no_update
     
     current_hole = int(current_hole) if current_hole else 1
     triggered_id = ctx.triggered_id
