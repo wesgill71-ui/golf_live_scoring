@@ -168,7 +168,7 @@ app.layout = html.Div([
     Output('page-content', 'children'),
     Input('url', 'pathname'),
     Input('session-group', 'data'),
-    Input('session-hole', 'data') # NEW: Read the saved hole on load
+    State('session-hole', 'data') # NEW: Read the saved hole on load
 )
 def display_page(pathname, group_data, hole_data):
     if pathname == '/commissioner':
