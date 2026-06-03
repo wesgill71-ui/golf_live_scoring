@@ -55,7 +55,16 @@ def setup_complete_database():
     players_data = [
         (1, 'Wes', -2.0), # Storing + handicaps as negative numbers for straightforward net score logic
         (2, 'Matt', 10.0),
-        (3, 'Jim', 15.0)
+        (3, 'Slim', 15.0),
+        (4, 'Bubba', 10.0),
+        (5, 'Mike', 10.0),
+        (6, 'Ewan', 10.0),
+        (7, 'Mitch', 10.0),
+        (8, 'Denver', 10.0),
+        (9, 'Cody', 10.0),
+        (10, 'Glen Bone', 10.0),
+        (11, 'Kalvin', 10.0),
+        (12, 'Saints', 10.0)
     ]
     cursor.executemany('INSERT OR IGNORE INTO Players VALUES (?, ?, ?)', players_data)
 
