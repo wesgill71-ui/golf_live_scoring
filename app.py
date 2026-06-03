@@ -58,8 +58,7 @@ def build_group_setup_layout():
             'border': 'none', 'borderRadius': '8px', 'fontSize': '18px', 'cursor': 'pointer', 'fontWeight': 'bold'
         }),
         
-        html.Div(id='setup-error', style={'color': 'red', 'marginTop': '15px', 'textAlign': 'center', 'fontWeight': 'bold'}),
-        html.A("Commissioner Setup", href="/commissioner", style={'display': 'block', 'textAlign': 'center', 'marginTop': '50px', 'fontSize': '12px', 'color': '#ccc', 'textDecoration': 'none'})
+        html.Div(id='setup-error', style={'color': 'red', 'marginTop': '15px', 'textAlign': 'center', 'fontWeight': 'bold'})
     ])
 
 def build_scoring_layout(selected_player_ids):
@@ -274,4 +273,4 @@ def change_hole(prev_clicks, next_clicks, current_hole):
     return current_hole, no_update
 
 if __name__ == '__main__':
-    app.run(debug=True, port=8887)
+    app.run(debug=True, port=8886)
