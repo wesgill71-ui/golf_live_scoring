@@ -5,7 +5,7 @@ import pandas as pd
 app = Dash(__name__, suppress_callback_exceptions=True)
 server = app.server
 
-# --- Ensure Settings Table Exists ---
+# --- Ensure Settings Table Exists & Initialize Defaults ---
 conn = sqlite3.connect('golf_trip.db')
 cursor = conn.cursor()
 cursor.execute('''
@@ -15,6 +15,7 @@ cursor.execute('''
     )
 ''')
 cursor.execute("INSERT OR IGNORE INTO Settings (key, value) VALUES ('active_course_id', '1')")
+cursor.execute("INSERT OR IGNORE INTO Settings (key, value) VALUES ('tournament_format', 'Stroke Play')")
 conn.commit()
 conn.close()
 
@@ -34,6 +35,12 @@ def get_players_df():
 course_options = get_options("SELECT * FROM Courses", 'course_name', 'course_id')
 hole_options = [{'label': f'Hole {i}', 'value': i} for i in range(1, 19)]
 
+format_options = [
+    {'label': 'Stroke Play (Gross)', 'value': 'Stroke Play'},
+    {'label': 'Net Stroke Play', 'value': 'Net Stroke Play'},
+    {'label': 'Stableford (Net)', 'value': 'Stableford'}
+]
+
 # --- Layout Builders ---
 
 def build_group_setup_layout():
@@ -42,7 +49,7 @@ def build_group_setup_layout():
     
     return html.Div(style={'fontFamily': 'system-ui, sans-serif', 'maxWidth': '500px', 'margin': 'auto', 'padding': '20px'}, children=[
         html.H1("Setup Round", style={'textAlign': 'center', 'marginBottom': '10px'}),
-        html.P("Select the players in your specific group:", style={'textAlign': 'center', 'color': '#666', 'marginBottom': '20px'}),
+        html.P("Select the players in your cart:", style={'textAlign': 'center', 'color': '#666', 'marginBottom': '20px'}),
         
         dcc.Dropdown(
             id='group-selector',
@@ -60,7 +67,8 @@ def build_group_setup_layout():
         html.Div(id='setup-error', style={'color': 'red', 'marginTop': '15px', 'textAlign': 'center', 'fontWeight': 'bold'})
     ])
 
-def build_scoring_layout(selected_player_ids):
+# NEW: We now pass the saved start_hole into the layout builder
+def build_scoring_layout(selected_player_ids, start_hole):
     conn = sqlite3.connect('golf_trip.db')
     placeholders = ','.join('?' for _ in selected_player_ids)
     df = pd.read_sql_query(f"SELECT * FROM Players WHERE player_id IN ({placeholders})", conn, params=selected_player_ids)
@@ -80,12 +88,12 @@ def build_scoring_layout(selected_player_ids):
             ])
         )
 
-    # VIEW 1: The Input Controls
     scoring_ui = html.Div(id='scoring-ui-container', style={'display': 'block'}, children=[
         html.Div(style={'display': 'flex', 'justifyContent': 'space-between', 'alignItems': 'center', 'backgroundColor': '#343a40', 'padding': '15px', 'borderRadius': '8px', 'marginBottom': '20px', 'color': 'white'}, children=[
             html.Button('←', id='prev-hole-btn', n_clicks=0, style={'padding': '10px 15px', 'backgroundColor': '#6c757d', 'color': 'white', 'border': 'none', 'borderRadius': '5px', 'cursor': 'pointer', 'fontWeight': 'bold', 'fontSize': '16px'}),
             html.Div(style={'display': 'flex', 'flexDirection': 'column', 'alignItems': 'center'}, children=[
-                dcc.Dropdown(id='hole-dropdown', options=hole_options, value=1, clearable=False, style={'width': '100px', 'color': 'black', 'marginBottom': '5px'}),
+                # Use the saved start_hole instead of a hardcoded 1
+                dcc.Dropdown(id='hole-dropdown', options=hole_options, value=start_hole, clearable=False, style={'width': '100px', 'color': 'black', 'marginBottom': '5px'}),
                 html.Span(id='par-display', style={'fontWeight': 'bold', 'fontSize': '14px', 'color': '#ffc107'})
             ]),
             html.Button('→', id='next-hole-btn', n_clicks=0, style={'padding': '10px 15px', 'backgroundColor': '#28a745', 'color': 'white', 'border': 'none', 'borderRadius': '5px', 'cursor': 'pointer', 'fontWeight': 'bold', 'fontSize': '16px'})
@@ -106,7 +114,6 @@ def build_scoring_layout(selected_player_ids):
         }),
     ])
 
-    # VIEW 2: The Leaderboard Screen
     leaderboard_ui = html.Div(id='leaderboard-ui-container', style={'display': 'none'}, children=[
         html.Button('← Back to Scoring', id='hide-leaderboard-btn', n_clicks=0, style={
             'width': '100%', 'padding': '10px', 'backgroundColor': '#6c757d', 'color': 'white',
@@ -133,9 +140,14 @@ def build_scoring_layout(selected_player_ids):
 admin_layout = html.Div(style={'fontFamily': 'system-ui, sans-serif', 'maxWidth': '500px', 'margin': 'auto', 'padding': '20px'}, children=[
     html.H1("Commissioner Dashboard", style={'textAlign': 'center', 'color': '#D32F2F'}),
     html.Div(style={'backgroundColor': '#f9f9f9', 'padding': '20px', 'borderRadius': '8px', 'border': '1px solid #eee', 'marginBottom': '20px'}, children=[
-        html.H3("Set Active Round", style={'marginTop': '0'}),
-        dcc.Dropdown(id='admin-course-dropdown', options=course_options, placeholder="Select Active Course", style={'marginBottom': '15px'}),
-        html.Button('Update Active Course', id='set-active-course-btn', n_clicks=0, style={'width': '100%', 'padding': '12px', 'backgroundColor': '#D32F2F', 'color': 'white', 'border': 'none', 'borderRadius': '5px', 'fontSize': '16px', 'cursor': 'pointer'}),
+        
+        html.H3("Active Course", style={'marginTop': '0', 'marginBottom': '10px'}),
+        dcc.Dropdown(id='admin-course-dropdown', options=course_options, placeholder="Select Active Course", style={'marginBottom': '25px'}),
+        
+        html.H3("Tournament Format", style={'marginTop': '0', 'marginBottom': '10px'}),
+        dcc.Dropdown(id='admin-format-dropdown', options=format_options, placeholder="Select Format", style={'marginBottom': '25px'}),
+        
+        html.Button('Lock In Settings', id='save-settings-btn', n_clicks=0, style={'width': '100%', 'padding': '12px', 'backgroundColor': '#D32F2F', 'color': 'white', 'border': 'none', 'borderRadius': '5px', 'fontSize': '16px', 'cursor': 'pointer', 'fontWeight': 'bold'}),
         html.Div(id='admin-output-message', style={'marginTop': '15px', 'textAlign': 'center', 'fontWeight': 'bold'})
     ]),
     html.A("← Back to App", href="/", style={'display': 'block', 'textAlign': 'center', 'marginTop': '30px', 'textDecoration': 'none', 'color': '#007BFF', 'fontWeight': 'bold'})
@@ -144,7 +156,9 @@ admin_layout = html.Div(style={'fontFamily': 'system-ui, sans-serif', 'maxWidth'
 # --- Main App Container ---
 app.layout = html.Div([
     dcc.Location(id='url', refresh=False),
-    dcc.Store(id='session-group', storage_type='session'),
+    # NEW: Both memories are now 'local' so they survive aggressive mobile tab sleeping
+    dcc.Store(id='session-group', storage_type='local'),
+    dcc.Store(id='session-hole', storage_type='local'),
     html.Div(id='page-content')
 ])
 
@@ -153,17 +167,57 @@ app.layout = html.Div([
 @callback(
     Output('page-content', 'children'),
     Input('url', 'pathname'),
-    Input('session-group', 'data')
+    Input('session-group', 'data'),
+    Input('session-hole', 'data') # NEW: Read the saved hole on load
 )
-def display_page(pathname, group_data):
+def display_page(pathname, group_data, hole_data):
     if pathname == '/commissioner':
         return admin_layout
     if not group_data:
         return build_group_setup_layout()
     else:
-        return build_scoring_layout(group_data)
+        current_hole = hole_data if hole_data else 1
+        return build_scoring_layout(group_data, current_hole)
 
-# --- NEW: View Switching Toggle ---
+@callback(
+    Output('admin-course-dropdown', 'value'),
+    Output('admin-format-dropdown', 'value'),
+    Input('url', 'pathname')
+)
+def load_admin_defaults(pathname):
+    if pathname == '/commissioner':
+        conn = sqlite3.connect('golf_trip.db')
+        cursor = conn.cursor()
+        cursor.execute("SELECT value FROM Settings WHERE key = 'active_course_id'")
+        course_row = cursor.fetchone()
+        cursor.execute("SELECT value FROM Settings WHERE key = 'tournament_format'")
+        format_row = cursor.fetchone()
+        conn.close()
+        
+        c_val = int(course_row[0]) if course_row else None
+        f_val = format_row[0] if format_row else None
+        return c_val, f_val
+    return no_update, no_update
+
+@callback(
+    Output('admin-output-message', 'children'),
+    Input('save-settings-btn', 'n_clicks'),
+    State('admin-course-dropdown', 'value'),
+    State('admin-format-dropdown', 'value'),
+    prevent_initial_call=True
+)
+def save_tournament_settings(n_clicks, course_id, format_val):
+    if not course_id or not format_val:
+        return html.Span("Please select both a course and a format.", style={'color': 'red'})
+    
+    conn = sqlite3.connect('golf_trip.db')
+    cursor = conn.cursor()
+    cursor.execute("REPLACE INTO Settings (key, value) VALUES ('active_course_id', ?)", (str(course_id),))
+    cursor.execute("REPLACE INTO Settings (key, value) VALUES ('tournament_format', ?)", (str(format_val),))
+    conn.commit()
+    conn.close()
+    return html.Span("Tournament settings locked in!", style={'color': 'green'})
+
 @callback(
     Output('scoring-ui-container', 'style'),
     Output('leaderboard-ui-container', 'style'),
@@ -181,6 +235,7 @@ def toggle_views(show_clicks, hide_clicks):
 
 @callback(
     Output('session-group', 'data', allow_duplicate=True),
+    Output('session-hole', 'data', allow_duplicate=True), # NEW: Start on Hole 1
     Output('setup-error', 'children', allow_duplicate=True),
     Input('start-round-btn', 'n_clicks'),
     State('group-selector', 'value'),
@@ -188,16 +243,17 @@ def toggle_views(show_clicks, hide_clicks):
 )
 def start_round(n_clicks, selected_players):
     if not selected_players or len(selected_players) == 0:
-        return no_update, "Please select at least one player to tee off."
-    return selected_players, ""
+        return no_update, no_update, "Please select at least one player to tee off."
+    return selected_players, 1, ""
 
 @callback(
     Output('session-group', 'data', allow_duplicate=True),
+    Output('session-hole', 'data', allow_duplicate=True), # NEW: Reset Hole memory
     Input('clear-group-btn', 'n_clicks'),
     prevent_initial_call=True
 )
 def clear_group(n_clicks):
-    return None
+    return None, 1
 
 @callback(Output('course-dropdown', 'value'), Input('url', 'pathname'))
 def set_default_course(pathname):
@@ -209,21 +265,6 @@ def set_default_course(pathname):
         conn.close()
         if row: return int(row[0])
     return None
-
-@callback(
-    Output('admin-output-message', 'children'),
-    Input('set-active-course-btn', 'n_clicks'),
-    State('admin-course-dropdown', 'value'),
-    prevent_initial_call=True
-)
-def update_active_course(n_clicks, course_id):
-    if not course_id: return html.Span("Please select a course.", style={'color': 'red'})
-    conn = sqlite3.connect('golf_trip.db')
-    cursor = conn.cursor()
-    cursor.execute("REPLACE INTO Settings (key, value) VALUES ('active_course_id', ?)", (str(course_id),))
-    conn.commit()
-    conn.close()
-    return html.Span("Active course updated!", style={'color': 'green'})
 
 @callback(
     Output('par-display', 'children'),
@@ -298,6 +339,15 @@ def change_hole(prev_clicks, next_clicks, current_hole):
         return current_hole - 1, ""
     return current_hole, no_update
 
+# --- NEW: Constantly save the hole to the device memory whenever it changes ---
+@callback(
+    Output('session-hole', 'data', allow_duplicate=True),
+    Input('hole-dropdown', 'value'),
+    prevent_initial_call=True
+)
+def save_current_hole(hole_val):
+    return hole_val
+
 @callback(
     Output('leaderboard-container', 'children'),
     Input('course-dropdown', 'value'),
@@ -308,6 +358,11 @@ def render_live_leaderboard(course_id, n_clicks):
         return html.Div()
         
     conn = sqlite3.connect('golf_trip.db')
+    cursor = conn.cursor()
+    cursor.execute("SELECT value FROM Settings WHERE key = 'tournament_format'")
+    format_row = cursor.fetchone()
+    current_format = format_row[0] if format_row else "Stroke Play"
+    
     query = """
         SELECT 
             p.name,
@@ -358,7 +413,7 @@ def render_live_leaderboard(course_id, n_clicks):
         ]))
 
     return html.Div(style={'marginTop': '10px'}, children=[
-        html.H3("Live Leaderboard (Gross)", style={'textAlign': 'center', 'marginBottom': '15px'}),
+        html.H3(f"Live Leaderboard ({current_format})", style={'textAlign': 'center', 'marginBottom': '15px'}),
         html.Table(style={'width': '100%', 'borderCollapse': 'collapse', 'boxShadow': '0 2px 5px rgba(0,0,0,0.1)'}, children=table_rows)
     ])
 
