@@ -67,7 +67,6 @@ def build_group_setup_layout():
         html.Div(id='setup-error', style={'color': 'red', 'marginTop': '15px', 'textAlign': 'center', 'fontWeight': 'bold'})
     ])
 
-# NEW: We now pass the saved start_hole into the layout builder
 def build_scoring_layout(selected_player_ids, start_hole):
     conn = sqlite3.connect('golf_trip.db')
     placeholders = ','.join('?' for _ in selected_player_ids)
@@ -92,7 +91,6 @@ def build_scoring_layout(selected_player_ids, start_hole):
         html.Div(style={'display': 'flex', 'justifyContent': 'space-between', 'alignItems': 'center', 'backgroundColor': '#343a40', 'padding': '15px', 'borderRadius': '8px', 'marginBottom': '20px', 'color': 'white'}, children=[
             html.Button('←', id='prev-hole-btn', n_clicks=0, style={'padding': '10px 15px', 'backgroundColor': '#6c757d', 'color': 'white', 'border': 'none', 'borderRadius': '5px', 'cursor': 'pointer', 'fontWeight': 'bold', 'fontSize': '16px'}),
             html.Div(style={'display': 'flex', 'flexDirection': 'column', 'alignItems': 'center'}, children=[
-                # Use the saved start_hole instead of a hardcoded 1
                 dcc.Dropdown(id='hole-dropdown', options=hole_options, value=start_hole, clearable=False, style={'width': '100px', 'color': 'black', 'marginBottom': '5px'}),
                 html.Span(id='par-display', style={'fontWeight': 'bold', 'fontSize': '14px', 'color': '#ffc107'})
             ]),
@@ -156,7 +154,6 @@ admin_layout = html.Div(style={'fontFamily': 'system-ui, sans-serif', 'maxWidth'
 # --- Main App Container ---
 app.layout = html.Div([
     dcc.Location(id='url', refresh=False),
-    # NEW: Both memories are now 'local' so they survive aggressive mobile tab sleeping
     dcc.Store(id='session-group', storage_type='local'),
     dcc.Store(id='session-hole', storage_type='local'),
     html.Div(id='page-content')
@@ -168,7 +165,7 @@ app.layout = html.Div([
     Output('page-content', 'children'),
     Input('url', 'pathname'),
     Input('session-group', 'data'),
-    State('session-hole', 'data') # NEW: Read the saved hole on load
+    State('session-hole', 'data') # CRITICAL FIX: Changed from Input to State
 )
 def display_page(pathname, group_data, hole_data):
     if pathname == '/commissioner':
@@ -176,7 +173,7 @@ def display_page(pathname, group_data, hole_data):
     if not group_data:
         return build_group_setup_layout()
     else:
-        current_hole = hole_data if hole_data else 1
+        current_hole = int(hole_data) if hole_data else 1
         return build_scoring_layout(group_data, current_hole)
 
 @callback(
@@ -207,6 +204,7 @@ def load_admin_defaults(pathname):
     prevent_initial_call=True
 )
 def save_tournament_settings(n_clicks, course_id, format_val):
+    if not n_clicks: return no_update
     if not course_id or not format_val:
         return html.Span("Please select both a course and a format.", style={'color': 'red'})
     
@@ -226,6 +224,7 @@ def save_tournament_settings(n_clicks, course_id, format_val):
     prevent_initial_call=True
 )
 def toggle_views(show_clicks, hide_clicks):
+    if not show_clicks and not hide_clicks: return no_update, no_update
     triggered_id = ctx.triggered_id
     if triggered_id == 'show-leaderboard-btn':
         return {'display': 'none'}, {'display': 'block'}
@@ -235,24 +234,26 @@ def toggle_views(show_clicks, hide_clicks):
 
 @callback(
     Output('session-group', 'data', allow_duplicate=True),
-    Output('session-hole', 'data', allow_duplicate=True), # NEW: Start on Hole 1
+    Output('session-hole', 'data', allow_duplicate=True),
     Output('setup-error', 'children', allow_duplicate=True),
     Input('start-round-btn', 'n_clicks'),
     State('group-selector', 'value'),
     prevent_initial_call=True
 )
 def start_round(n_clicks, selected_players):
+    if not n_clicks: return no_update, no_update, no_update
     if not selected_players or len(selected_players) == 0:
         return no_update, no_update, "Please select at least one player to tee off."
     return selected_players, 1, ""
 
 @callback(
     Output('session-group', 'data', allow_duplicate=True),
-    Output('session-hole', 'data', allow_duplicate=True), # NEW: Reset Hole memory
+    Output('session-hole', 'data', allow_duplicate=True),
     Input('clear-group-btn', 'n_clicks'),
     prevent_initial_call=True
 )
 def clear_group(n_clicks):
+    if not n_clicks: return no_update, no_update # CRITICAL FIX: Blocks phantom triggers
     return None, 1
 
 @callback(Output('course-dropdown', 'value'), Input('url', 'pathname'))
@@ -304,6 +305,7 @@ def update_hole_view(course_id, hole_num, player_ids):
     prevent_initial_call=True
 )
 def save_group_scores(n_clicks, course_id, hole, player_ids, player_scores):
+    if not n_clicks: return no_update
     if not course_id or not hole:
         return html.Span("Error: Course and Hole must be selected.", style={'color': 'red'})
         
@@ -332,6 +334,9 @@ def save_group_scores(n_clicks, course_id, hole, player_ids, player_scores):
     prevent_initial_call=True
 )
 def change_hole(prev_clicks, next_clicks, current_hole):
+    if not prev_clicks and not next_clicks: return no_update, no_update # CRITICAL FIX
+    
+    current_hole = int(current_hole) if current_hole else 1
     triggered_id = ctx.triggered_id
     if triggered_id == 'next-hole-btn' and current_hole < 18:
         return current_hole + 1, ""
@@ -339,14 +344,14 @@ def change_hole(prev_clicks, next_clicks, current_hole):
         return current_hole - 1, ""
     return current_hole, no_update
 
-# --- NEW: Constantly save the hole to the device memory whenever it changes ---
 @callback(
     Output('session-hole', 'data', allow_duplicate=True),
     Input('hole-dropdown', 'value'),
     prevent_initial_call=True
 )
 def save_current_hole(hole_val):
-    return hole_val
+    if hole_val is None: return no_update
+    return int(hole_val)
 
 @callback(
     Output('leaderboard-container', 'children'),
